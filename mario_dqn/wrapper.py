@@ -99,3 +99,80 @@ class CoinRewardWrapper(gym.Wrapper):
         obs, reward, done, info = self.env.step(action)
         reward += info['coins'] * 10
         return obs, reward, done, info
+
+
+class FrameStackWrapper(gym.Wrapper):
+    """
+    Overview:
+       Stack latest n frames(usually 4 in Atari) as one observation.
+    Interface:
+        ``__init__``, ``reset``, ``step``, ``_get_ob``, ``new_shape``
+    Properties:
+        - env (:obj:`gym.Env`): the environment to wrap.
+        - n_frame (:obj:`int`): the number of frames to stack.
+        - ``observation_space``, ``frames``
+    """
+
+    def __init__(self, env, n_frames=4):
+        """
+        Overview:
+            Initialize ``self.`` See ``help(type(self))`` for accurate signature; setup the properties.
+        Arguments:
+            - env (:obj:`gym.Env`): the environment to wrap.
+            - n_frame (:obj:`int`): the number of frames to stack.
+        """
+        super().__init__(env)
+        self.n_frames = n_frames
+        self.frames = deque([], maxlen=n_frames)
+        obs_space = env.observation_space
+        if not isinstance(obs_space, gym.spaces.tuple.Tuple):
+            obs_space = (obs_space, )
+        shape = (n_frames, ) + obs_space[0].shape
+        self.observation_space = gym.spaces.tuple.Tuple(
+            [
+                gym.spaces.Box(
+                    low=np.min(obs_space[0].low), high=np.max(obs_space[0].high), shape=shape, dtype=obs_space[0].dtype
+                ) for _ in range(len(obs_space))
+            ]
+        )
+        if len(self.observation_space) == 1:
+            self.observation_space = self.observation_space[0]
+
+    def reset(self):
+        """
+        Overview:
+            Resets the state of the environment and append new observation to frames
+        Returns:
+            - ``self._get_ob()``: observation
+        """
+        obs = self.env.reset()
+        for _ in range(self.n_frames):
+            self.frames.append(obs)
+        return self._get_ob()
+
+    def step(self, action):
+        """
+        Overview:
+            Step the environment with the given action. Repeat action, sum reward,  \
+                and max over last observations, and append new observation to frames
+        Arguments:
+            - action (:obj:`Any`): the given action to step with.
+        Returns:
+            - ``self._get_ob()`` : observation
+            - reward (:obj:`Any`) : amount of reward returned after previous action
+            - done (:obj:`Bool`) : whether the episode has ended, in which case further \
+                 step() calls will return undefined results
+            - info (:obj:`Dict`) : contains auxiliary diagnostic information (helpful  \
+                for debugging, and sometimes learning)
+        """
+
+        obs, reward, done, info = self.env.step(action)
+        self.frames.append(obs)
+        return self._get_ob(), reward, done, info
+
+    def _get_ob(self):
+        """
+        Overview:
+            The original wrapper use `LazyFrames` but since we use np buffer, it has no effect
+        """
+        return np.stack(self.frames, axis=0)
